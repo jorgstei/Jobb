@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sudoku</string>
+    <string name="tutorial_text">I Sudoku er målet å fylle ut hele 9x9 rutenettet, slik at hver rad, kolonne og 3x3 rute har akkurat et av hvert tall fra 1-9.\n\nNår du tror du har klart det, trykk på knappen for å sjekke om løsningen er rett.\n\nLykke til!\n\nEt løst brett kan se slik ut:</string>
+    <string name="play_string">Spill</string>
+    <string name="action_settings">Innstillinger</string>
+    <string name="easy_string">Lett</string>
+    <string name="medium_string">Medium</string>
+    <string name="hard_string">Vanskelig</string>
+    <string name="new_game_string">Legg til et nytt spill</string>
+    <string name="tutorial_string">Hvordan spille sudoku</string>
+    <string name="check_solution_string">Sjekk løsning</string>
+    <string name="congratulations_string">Gratulerer!\nDu vant</string>
+    <string name="language_pref_string">Språkvalg</string>
+    <string name="language_string">Språk</string>
+    <string name="incorrect_string">Feil løsning</string>
+    <string name="solved_board_string">Test med et løst brett</string>
+
+</resources>

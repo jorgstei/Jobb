@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:id="@+id/outer_layout"
+    tools:context=".MainActivity">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/play_string"
+        android:id="@+id/play_tw"
+        android:textSize="40dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginVertical="20dp"/>
+    <LinearLayout
+        android:id="@+id/button_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_horizontal"
+        android:layout_marginTop="20dp">
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:id="@+id/easy_button"
+            android:onClick="generate_game"
+            android:layout_margin="5dp"
+            android:text="@string/easy_string"/>
+
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:id="@+id/medium_button"
+            android:onClick="generate_game"
+            android:layout_margin="5dp"
+            android:text="@string/medium_string"/>
+
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:id="@+id/hard_button"
+            android:onClick="generate_game"
+            android:text="@string/hard_string"
+            android:layout_margin="5dp"/>
+    </LinearLayout>
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/add_new_game_button"
+        android:text="@string/new_game_string"
+        android:onClick="generate_game"
+        android:layout_marginTop="30dp"
+        android:layout_gravity="center_horizontal"/>
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/solved_board_btn"
+        android:text="@string/solved_board_string"
+        android:onClick="generate_game"
+        android:layout_marginTop="30dp"
+        android:layout_gravity="center_horizontal"/>
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/tutorial_button"
+        android:text="@string/tutorial_string"
+        android:onClick="open_tutorial"
+        android:layout_marginTop="30dp"
+        android:layout_gravity="center_horizontal"/>
+
+
+
+
+</LinearLayout>
