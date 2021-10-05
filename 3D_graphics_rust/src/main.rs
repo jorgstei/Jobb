@@ -5,6 +5,9 @@ use std::sync::{Mutex, Arc, RwLock};
 
 mod shader;
 mod util;
+mod mesh;
+mod scene_graph;
+use scene_graph::SceneNode;
 
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
@@ -38,14 +41,14 @@ fn offset<T>(n: u32) -> *const c_void {
 
 
 // == // Modify and complete the function below for the first task
-unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>) -> u32 {
+unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>, normals: &Vec<f32>) -> u32 {
     // Create and bind VAO
     let mut vao_id = 0;
     gl::GenVertexArrays(1, &mut vao_id);
     gl::BindVertexArray(vao_id);
     println!("VAO is loaded: {}. It has ID: {}", gl::GenVertexArrays::is_loaded(), vao_id);
 
-    // Combine coordinates and colors
+    // Combine coordinates, colors and normals. Combined format is now: [x,y,z,r,g,b,i,j,k, x,y,x...]
     let mut combined: Vec<f32> = vec![];
     let length_divided_by_three = coords.len()/3;
     for i in 0..length_divided_by_three {
@@ -55,9 +58,12 @@ unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>) ->
         for j in 0..3{
             combined.push(colors[i*3+j]);
         }
+        for j in 0..3{
+            combined.push(normals[i*3+j]);
+        }
     }
 
-    println!("{:?}", combined);
+    //println!("{:?}", combined);
     
     // Create, bind, fill and unbind VBO
     let mut vbo_id = 0;
@@ -68,12 +74,19 @@ unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>) ->
 
     println!("VBO is loaded: {}. It has ID: {}", gl::GenBuffers::is_loaded(), vbo_id);
     
-    // VertexAttri
-    gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 24, ptr::null());
+    // Bytes in float * amount of floats per attribute(vertices, colors, normals) * amount of attributes
+    let stride = 4*3*3;
+    // VertexAttrib for vertices
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, stride, ptr::null());
     gl::EnableVertexAttribArray(0);
 
-    gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, 24, offset::<f32>(3));
+    // VertexAttrib for colors
+    gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, stride, offset::<f32>(3));
     gl::EnableVertexAttribArray(1);
+
+    // VertexAttrib for normals
+    gl::VertexAttribPointer(4, 3, gl::FLOAT, gl::FALSE, stride, offset::<f32>(6));
+    gl::EnableVertexAttribArray(4);
 
     // Index buffer
     let mut ind_buf_id = 0;
@@ -108,6 +121,9 @@ fn main() {
     // Make a reference of this tuple to send to the render thread
     let mouse_delta = Arc::clone(&arc_mouse_delta);
 
+    // Load meshes
+    let lunar_surface = mesh::Terrain::load("./resources/lunarsurface.obj");
+    let helicopter = mesh::Helicopter::load("./resources/helicopter.obj");
     // Spawn a separate thread for rendering, so event handling doesn't block rendering
     let render_thread = thread::spawn(move || {
         // Acquire the OpenGL Context and load the function pointers. This has to be done inside of the rendering thread, because
@@ -163,20 +179,6 @@ fn main() {
             12,13,14
            
         ];
-        
-        /*
-            0.0, 1.0,  1.0,
-            0.0, 1.0, 1.0,
-            0.0, 1.0, 1.0,
-
-            1.0, 0.3, 0.3,
-            1.0, 0.3, 0.3,
-            1.0, 0.3, 0.3,
-
-            1.0, 1.0, 0.0,
-            1.0, 1.0, 0.0,
-            1.0, 1.0, 0.0
-        */
 
         let colors: Vec<f32> = vec![
             
@@ -194,9 +196,34 @@ fn main() {
             
         ];
         
-        let vao_id = unsafe { VAO_setup(&vertices, &indices, &colors) };
+        //let vao_id = unsafe { VAO_setup(&vertices, &indices, &colors) };
+        let mut root_node = SceneNode::new();
 
+        let lunar_vao_id = unsafe { VAO_setup(&lunar_surface.vertices, &lunar_surface.indices, &lunar_surface.colors, &lunar_surface.normals) };
+        let mut lunar_node = SceneNode::from_vao(lunar_vao_id, lunar_surface.indices.len() as i32);
         
+        let helicopter_body_vao_id = unsafe { VAO_setup(&helicopter.body.vertices, &helicopter.body.indices, &helicopter.body.colors, &helicopter.body.normals)};
+        let mut helicopter_body_node = SceneNode::from_vao(helicopter_body_vao_id, helicopter.body.indices.len() as i32);
+        
+        
+        let helicopter_door_vao_id = unsafe { VAO_setup(&helicopter.door.vertices, &helicopter.door.indices, &helicopter.door.colors, &helicopter.door.normals)};
+        let mut helicopter_door_node = SceneNode::from_vao(helicopter_door_vao_id, helicopter.door.indices.len() as i32);
+        
+        let helicopter_main_rotor_vao_id = unsafe { VAO_setup(&helicopter.main_rotor.vertices, &helicopter.main_rotor.indices, &helicopter.main_rotor.colors, &helicopter.main_rotor.normals)};
+        let mut helicopter_main_rotor_node = SceneNode::from_vao(helicopter_main_rotor_vao_id, helicopter.main_rotor.indices.len() as i32);
+        
+        
+        let helicopter_tail_rotor_vao_id = unsafe { VAO_setup(&helicopter.tail_rotor.vertices, &helicopter.tail_rotor.indices, &helicopter.tail_rotor.colors, &helicopter.tail_rotor.normals)};
+        let mut helicopter_tail_rotor_node = SceneNode::from_vao(helicopter_tail_rotor_vao_id, helicopter.tail_rotor.indices.len() as i32);
+        
+        
+        // Add relations between nodes
+        helicopter_body_node.add_child(&helicopter_door_node);
+        helicopter_body_node.add_child(&helicopter_main_rotor_node);
+        helicopter_body_node.add_child(&helicopter_tail_rotor_node);
+        lunar_node.add_child(&helicopter_body_node);
+        root_node.add_child(&lunar_node);
+
         // Basic usage of shader helper:
         // The example code below returns a shader object, which contains the field .program_id.
         // The snippet is not enough to do the assignment, and will need to be modified (outside of
@@ -229,11 +256,11 @@ fn main() {
         let mut camera_z: f32 = -2.0; // Initialized to -2 to do the initial translation
         let mut camera_horizontal_rot: f32 = 0.0;
         let mut camera_vertical_rot: f32 = 0.0;
-        let scaling_factor: f32 = 2.0;
-
+        let scaling_factor: f32 = 5.0;
+        let rotation_scaling_factor: f32 = 1.5;
         // The main rendering loop
         let mut counter = 0;
-        let perspective: glm::Mat4 =glm::perspective(SCREEN_W as f32 / SCREEN_H as f32, 1.2, 1.0, 100.0);
+        let perspective: glm::Mat4 =glm::perspective(SCREEN_W as f32 / SCREEN_H as f32, 1.2, 1.0, 1000.0);
         loop {
             counter+=1;
             if(counter % 100 == 0){
@@ -264,6 +291,7 @@ fn main() {
 
                 let cos_theta_vert = camera_vertical_rot.cos();
                 let sin_theta_vert = camera_vertical_rot.sin();
+                
                 let vertical_rotation: glm::Mat4 = glm::mat4(
                     1.0, 0.0, 0.0, 0.0, 
                     0.0, cos_theta_vert, -sin_theta_vert, 0.0, 
@@ -273,7 +301,7 @@ fn main() {
 
                 // Set angle so we can use it next frame
 
-                let combined_transformation = perspective*horizontal_rotation*vertical_rotation*translate_by_camera_pos;
+                let combined_transformation = perspective*vertical_rotation*horizontal_rotation*translate_by_camera_pos;
                 gl::UniformMatrix4fv(2, 1, gl::FALSE, combined_transformation.as_ptr());
                 gl::Uniform1f(3, elapsed.sin()/2.0);
             }
@@ -311,28 +339,28 @@ fn main() {
                         // y controlled by space and ctrl
                         // Honestly not 100% sure about these, but i think it works as intended, it becomes hard to conseptualize after a while
                         VirtualKeyCode::Space => {
-                            camera_z -= delta_time*scaling_factor*(-camera_horizontal_rot).cos()*(-camera_vertical_rot).sin();
-                            camera_x -= delta_time*scaling_factor*(-camera_horizontal_rot).sin()*(-camera_vertical_rot).sin();
-                            camera_y -= delta_time*scaling_factor*(-1.0*camera_vertical_rot).cos();
+                            //camera_z -= delta_time*scaling_factor*(-camera_horizontal_rot).cos()*(-camera_vertical_rot).sin();
+                            //camera_x -= delta_time*scaling_factor*(-camera_horizontal_rot).sin()*(-camera_vertical_rot).sin();
+                            camera_y -= delta_time*scaling_factor;//*(-1.0*camera_vertical_rot).cos();
                         },
                         VirtualKeyCode::LControl=> {
-                            camera_z += delta_time*scaling_factor*(-camera_horizontal_rot).cos()*(-camera_vertical_rot).sin();
-                            camera_x += delta_time*scaling_factor*(-camera_horizontal_rot).sin()*(-camera_vertical_rot).sin();
-                            camera_y += delta_time*scaling_factor*(-1.0*camera_vertical_rot).cos();
+                            //camera_z += delta_time*scaling_factor*(-camera_horizontal_rot).cos()*(-camera_vertical_rot).sin();
+                            //camera_x += delta_time*scaling_factor*(-camera_horizontal_rot).sin()*(-camera_vertical_rot).sin();
+                            camera_y += delta_time*scaling_factor;//*(-1.0*camera_vertical_rot).cos();
                         },
 
                         // Rotation horizontal and vertical controlled by arrow keys
                         VirtualKeyCode::Left => {
-                            camera_horizontal_rot -= delta_time*scaling_factor;
+                            camera_horizontal_rot -= delta_time*rotation_scaling_factor;
                         },
                         VirtualKeyCode::Right => {
-                            camera_horizontal_rot += delta_time*scaling_factor;
+                            camera_horizontal_rot += delta_time*rotation_scaling_factor;
                         },
                         VirtualKeyCode::Up => {
-                            camera_vertical_rot -= delta_time*scaling_factor;
+                            camera_vertical_rot -= delta_time*rotation_scaling_factor;
                         },
                         VirtualKeyCode::Down => {
-                            camera_vertical_rot += delta_time*scaling_factor;
+                            camera_vertical_rot += delta_time*rotation_scaling_factor;
                         },
                         // Reset camera position and rotation
                         VirtualKeyCode::R => {
@@ -366,8 +394,24 @@ fn main() {
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
                 
                 // Issue the necessary commands to draw your scene here
-                gl::BindVertexArray(vao_id);
-                gl::DrawElements(gl::TRIANGLES, vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+                //gl::BindVertexArray(vao_id);
+                // vertices.len() +
+                gl::BindVertexArray(lunar_vao_id);
+                gl::DrawElements(gl::TRIANGLES, lunar_surface.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+
+                gl::BindVertexArray(helicopter_body_vao_id);
+                gl::DrawElements(gl::TRIANGLES, helicopter.body.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+
+                gl::BindVertexArray(helicopter_door_vao_id);
+                gl::DrawElements(gl::TRIANGLES, helicopter.door.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+
+                gl::BindVertexArray(helicopter_main_rotor_vao_id);
+                gl::DrawElements(gl::TRIANGLES, helicopter.main_rotor.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+
+                gl::BindVertexArray(helicopter_tail_rotor_vao_id);
+                gl::DrawElements(gl::TRIANGLES, helicopter.tail_rotor.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+
+                
             }
 
             context.swap_buffers().unwrap();
