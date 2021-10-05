@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">Sudoku</string>
+    <string name="tutorial_text">In Sudoku the objective is to fill out the full 9x9 grid, such that each row, column and 3x3 square contain exactly 1 of each of the numbers from 1-9.\n\nWhen you think you\'ve done it, just press the button to check your answer.\n\nGood luck!\n\nA solved board could look like this:</string>
+    <string name="action_settings">Settings</string>
+    <string name="play_string">Play</string>
+    <string name="easy_string">Easy</string>
+    <string name="hard_string">Hard</string>
+    <string name="medium_string">Medium</string>
+    <string name="new_game_string">Add a new game</string>
+    <string name="tutorial_string">Tutorial</string>
+    <string name="check_solution_string">Check solution</string>
+    <string name="congratulations_string">Congratulations!\nYou won</string>
+    <string name="language_pref_string">Language Preference</string>
+    <string name="language_string">Language</string>
+    <string name="incorrect_string">Incorrect solution</string>
+    <string name="solved_board_string">Test with a solved board</string>
+
+
+</resources>

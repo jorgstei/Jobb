@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="new_Linear_Layout" type="id" />
+    <item name="hint_text" type="id" />
+    <item name="input" type="id" />
+    <item name="new_game_button" type="id"/>
+    <item name="difficulty_dropdown" type="id"/>
+</resources>
