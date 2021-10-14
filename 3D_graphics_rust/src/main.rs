@@ -6,8 +6,10 @@ use std::sync::{Mutex, Arc, RwLock};
 mod shader;
 mod util;
 mod mesh;
+mod toolbox;
 mod scene_graph;
 use scene_graph::SceneNode;
+
 
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
@@ -55,16 +57,14 @@ unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>, no
         for j in 0..3{
             combined.push(coords[i*3+j]);
         }
-        for j in 0..3{
-            combined.push(colors[i*3+j]);
+        for j in 0..4{
+            combined.push(colors[i*4+j]);
         }
         for j in 0..3{
             combined.push(normals[i*3+j]);
         }
     }
 
-    //println!("{:?}", combined);
-    
     // Create, bind, fill and unbind VBO
     let mut vbo_id = 0;
     gl::GenBuffers(1, &mut vbo_id);
@@ -74,18 +74,18 @@ unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>, no
 
     println!("VBO is loaded: {}. It has ID: {}", gl::GenBuffers::is_loaded(), vbo_id);
     
-    // Bytes in float * amount of floats per attribute(vertices, colors, normals) * amount of attributes
-    let stride = 4*3*3;
+    // Bytes in float * amount of floats per attribute(vertices, colors, normals) * amount of attributes + 4 because alpha
+    let stride = 4*3*3+4;
     // VertexAttrib for vertices
     gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, stride, ptr::null());
     gl::EnableVertexAttribArray(0);
 
     // VertexAttrib for colors
-    gl::VertexAttribPointer(1, 3, gl::FLOAT, gl::FALSE, stride, offset::<f32>(3));
+    gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, stride, offset::<f32>(3));
     gl::EnableVertexAttribArray(1);
 
     // VertexAttrib for normals
-    gl::VertexAttribPointer(4, 3, gl::FLOAT, gl::FALSE, stride, offset::<f32>(6));
+    gl::VertexAttribPointer(4, 3, gl::FLOAT, gl::FALSE, stride, offset::<f32>(7));
     gl::EnableVertexAttribArray(4);
 
     // Index buffer
@@ -97,19 +97,71 @@ unsafe fn VAO_setup(coords: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>, no
     vao_id
 } 
 
+unsafe fn update_node_transformations(node: &mut scene_graph::SceneNode, transformation_so_far: &glm::Mat4) {
+    // Construct the correct transformation matrix
+    // Translate to reference point
+    let translation_to_ref = glm::translation(&-node.reference_point);
+    // Rotate around x
+    let rotate_x = glm::mat4(
+        1.0, 0.0, 0.0, 0.0, 
+        0.0, node.rotation[0].cos(), -node.rotation[0].sin(), 0.0, 
+        0.0, node.rotation[0].sin(), node.rotation[0].cos(), 0.0, 
+        0.0, 0.0, 0.0, 1.0 
+    );
+    // Rotate around y
+    let rotate_y = glm::mat4(
+        node.rotation[1].cos(), 0.0, node.rotation[1].sin(), 0.0, 
+        0.0, 1.0, 0.0, 0.0, 
+        -node.rotation[1].sin(), 0.0, node.rotation[1].cos(), 0.0, 
+        0.0, 0.0, 0.0, 1.0 
+    );
+    // Rotate around z
+    let rotate_z = glm::mat4(
+        node.rotation[2].cos(), -node.rotation[2].sin(), 0.0, 0.0, 
+        node.rotation[2].sin(), node.rotation[2].cos(), 0.0, 0.0, 
+        0.0, 0.0, 1.0, 0.0, 
+        0.0, 0.0, 0.0, 1.0 
+    );
+    // Translate back
+    let translation_back = glm::translation(&node.reference_point);
+
+    let translate_position = glm::translation(&glm::vec3(node.position[0], node.position[1], node.position[2]));
+    
+    //println!("Rotation of node with {} children is {} {}", node.children.len(), node.rotation, node.rotation[0]);
+    // Update the node's transformation matrix
+    node.current_transformation_matrix = transformation_so_far * translate_position * translation_back * rotate_x * rotate_y * rotate_z * translation_to_ref;
+    
+    // Recurse
+    for &child in &node.children {
+        update_node_transformations(&mut *child, &node.current_transformation_matrix);
+    }
+}
+
+unsafe fn draw_scene(node: &scene_graph::SceneNode, view_projection_matrix: &glm::Mat4) {
+    // Check if node is drawable, bind vao_id and draw
+    if node.index_count > 0 {
+        gl::UniformMatrix4fv(2, 1, gl::FALSE, (view_projection_matrix * node.current_transformation_matrix).as_ptr());
+        gl::UniformMatrix4fv(5, 1, gl::FALSE, node.current_transformation_matrix.as_ptr());
+        gl::BindVertexArray(node.vao_id);
+        gl::DrawElements(gl::TRIANGLES, node.index_count, gl::UNSIGNED_INT, ptr::null());
+        //println!("Ref point for node with {} children is {}", node.children.len(), node.reference_point);
+    }
+    // Call draw_scene for each child node aswell
+    for &child in &node.children {
+        draw_scene(&*child, view_projection_matrix);
+    }
+}
+
 fn main() {
     // Set up the necessary objects to deal with windows and event handling
     let el = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new()
-        .with_title("Gloom-rs")
+        .with_title("TDT4195")
         .with_resizable(false)
         .with_inner_size(glutin::dpi::LogicalSize::new(SCREEN_W, SCREEN_H));
     let cb = glutin::ContextBuilder::new()
         .with_vsync(true);
     let windowed_context = cb.build_windowed(wb, &el).unwrap();
-    // Uncomment these if you want to use the mouse for controls, but want it to be confined to the screen and/or invisible.
-    // windowed_context.window().set_cursor_grab(true).expect("failed to grab cursor");
-    // windowed_context.window().set_cursor_visible(false);
 
     // Set up a shared vector for keeping track of currently pressed keys
     let arc_pressed_keys = Arc::new(Mutex::new(Vec::<VirtualKeyCode>::with_capacity(10)));
@@ -121,9 +173,6 @@ fn main() {
     // Make a reference of this tuple to send to the render thread
     let mouse_delta = Arc::clone(&arc_mouse_delta);
 
-    // Load meshes
-    let lunar_surface = mesh::Terrain::load("./resources/lunarsurface.obj");
-    let helicopter = mesh::Helicopter::load("./resources/helicopter.obj");
     // Spawn a separate thread for rendering, so event handling doesn't block rendering
     let render_thread = thread::spawn(move || {
         // Acquire the OpenGL Context and load the function pointers. This has to be done inside of the rendering thread, because
@@ -152,82 +201,46 @@ fn main() {
             println!("GLSL\t: {}", util::get_gl_string(gl::SHADING_LANGUAGE_VERSION));
         }
 
-        // == // Set up your VAO here
-        // Friendly face culling is enabled warning
-        let vertices: Vec<f32> = vec![
-            
-            0.3, 0.7, 0.0,
-            -0.3, 0.7, 0.0,
-            0.0, -0.7, 0.0,
-            
-            -0.9, -0.7, -0.3,
-            -0.5, -0.7, -0.3,
-            -0.7, 0.7, -0.3,
-            
-            0.5, -0.7, -0.6,
-            0.9, -0.7, -0.6,
-            0.7, 0.7, -0.6
-
-        ];
-
-        
-        let indices: Vec<u32> = vec![
-            0,1,2,
-            3,4,5,
-            6,7,8,
-            9,10,11,
-            12,13,14
-           
-        ];
-
-        let colors: Vec<f32> = vec![
-            
-            1.0, 0.3, 0.3,
-            0.0, 0.5, 0.5,
-            1.0, 1.0, 0.0,
-            
-            0.031, 0.227, 0.549,
-            0.309, 0.909, 0.682,
-            0.815, 0.945, 0.894,
-
-            0.5, 0.5, 0.5,
-            1.0, 1.0, 1.0,
-            0.0, 0.0, 0.0
-            
-        ];
-        
         //let vao_id = unsafe { VAO_setup(&vertices, &indices, &colors) };
+        // Load meshes
+        let lunar_surface = mesh::Terrain::load("./resources/lunarsurface.obj");
+        let helicopter = mesh::Helicopter::load("./resources/helicopter.obj");
+        
         let mut root_node = SceneNode::new();
+        const n_of_helicopters: usize = 5;
+        let mut movement_speed = 1.0;
 
         let lunar_vao_id = unsafe { VAO_setup(&lunar_surface.vertices, &lunar_surface.indices, &lunar_surface.colors, &lunar_surface.normals) };
         let mut lunar_node = SceneNode::from_vao(lunar_vao_id, lunar_surface.indices.len() as i32);
         
-        let helicopter_body_vao_id = unsafe { VAO_setup(&helicopter.body.vertices, &helicopter.body.indices, &helicopter.body.colors, &helicopter.body.normals)};
-        let mut helicopter_body_node = SceneNode::from_vao(helicopter_body_vao_id, helicopter.body.indices.len() as i32);
-        
-        
-        let helicopter_door_vao_id = unsafe { VAO_setup(&helicopter.door.vertices, &helicopter.door.indices, &helicopter.door.colors, &helicopter.door.normals)};
-        let mut helicopter_door_node = SceneNode::from_vao(helicopter_door_vao_id, helicopter.door.indices.len() as i32);
-        
-        let helicopter_main_rotor_vao_id = unsafe { VAO_setup(&helicopter.main_rotor.vertices, &helicopter.main_rotor.indices, &helicopter.main_rotor.colors, &helicopter.main_rotor.normals)};
-        let mut helicopter_main_rotor_node = SceneNode::from_vao(helicopter_main_rotor_vao_id, helicopter.main_rotor.indices.len() as i32);
-        
-        
-        let helicopter_tail_rotor_vao_id = unsafe { VAO_setup(&helicopter.tail_rotor.vertices, &helicopter.tail_rotor.indices, &helicopter.tail_rotor.colors, &helicopter.tail_rotor.normals)};
-        let mut helicopter_tail_rotor_node = SceneNode::from_vao(helicopter_tail_rotor_vao_id, helicopter.tail_rotor.indices.len() as i32);
-        
-        
-        // Add relations between nodes
-        helicopter_body_node.add_child(&helicopter_door_node);
-        helicopter_body_node.add_child(&helicopter_main_rotor_node);
-        helicopter_body_node.add_child(&helicopter_tail_rotor_node);
-        lunar_node.add_child(&helicopter_body_node);
-        root_node.add_child(&lunar_node);
+        let mut body_nodes: Vec<scene_graph::Node> = Vec::new();
+        for i in 0..n_of_helicopters {
+            let helicopter_body_vao_id = unsafe { VAO_setup(&helicopter.body.vertices, &helicopter.body.indices, &helicopter.body.colors, &helicopter.body.normals)};
+            let mut helicopter_body_node = SceneNode::from_vao(helicopter_body_vao_id, helicopter.body.indices.len() as i32);
 
-        // Basic usage of shader helper:
-        // The example code below returns a shader object, which contains the field .program_id.
-        // The snippet is not enough to do the assignment, and will need to be modified (outside of
-        // just using the correct path), but it only needs to be called once
+            let helicopter_body_vao_id = unsafe { VAO_setup(&helicopter.body.vertices, &helicopter.body.indices, &helicopter.body.colors, &helicopter.body.normals)};
+            let mut helicopter_body_node = SceneNode::from_vao(helicopter_body_vao_id, helicopter.body.indices.len() as i32);
+            
+            let helicopter_door_vao_id = unsafe { VAO_setup(&helicopter.door.vertices, &helicopter.door.indices, &helicopter.door.colors, &helicopter.door.normals)};
+            let mut helicopter_door_node = SceneNode::from_vao(helicopter_door_vao_id, helicopter.door.indices.len() as i32);
+            
+            let helicopter_main_rotor_vao_id = unsafe { VAO_setup(&helicopter.main_rotor.vertices, &helicopter.main_rotor.indices, &helicopter.main_rotor.colors, &helicopter.main_rotor.normals)};
+            let mut helicopter_main_rotor_node = SceneNode::from_vao(helicopter_main_rotor_vao_id, helicopter.main_rotor.indices.len() as i32);
+            
+            let helicopter_tail_rotor_vao_id = unsafe { VAO_setup(&helicopter.tail_rotor.vertices, &helicopter.tail_rotor.indices, &helicopter.tail_rotor.colors, &helicopter.tail_rotor.normals)};
+            let mut helicopter_tail_rotor_node = SceneNode::from_vao(helicopter_tail_rotor_vao_id, helicopter.tail_rotor.indices.len() as i32);
+    
+            helicopter_tail_rotor_node.reference_point = glm::vec3(0.35, 2.3, 10.4);
+            // Add relationships between nodes
+            helicopter_body_node.add_child(&helicopter_door_node);
+            helicopter_body_node.add_child(&helicopter_main_rotor_node);
+            helicopter_body_node.add_child(&helicopter_tail_rotor_node);
+            lunar_node.add_child(&helicopter_body_node);
+    
+            body_nodes.push(helicopter_body_node);
+        }
+                
+        root_node.add_child(&lunar_node);
 
         let prog_id = unsafe {
             let shader = shader::ShaderBuilder::new()
@@ -249,62 +262,32 @@ fn main() {
         let first_frame_time = std::time::Instant::now();
         let mut last_frame_time = first_frame_time;
 
-
         // Camera orientation and position variables
         let mut camera_x: f32 = 0.0;
         let mut camera_y: f32 = 0.0;
         let mut camera_z: f32 = -2.0; // Initialized to -2 to do the initial translation
         let mut camera_horizontal_rot: f32 = 0.0;
         let mut camera_vertical_rot: f32 = 0.0;
-        let scaling_factor: f32 = 5.0;
-        let rotation_scaling_factor: f32 = 1.5;
+        let scaling_factor: f32 = 50.0;
+        let rotation_scaling_factor: f32 = 2.0;
         // The main rendering loop
         let mut counter = 0;
-        let perspective: glm::Mat4 =glm::perspective(SCREEN_W as f32 / SCREEN_H as f32, 1.2, 1.0, 1000.0);
+        let perspective: glm::Mat4 = glm::perspective(SCREEN_W as f32 / SCREEN_H as f32, 1.2, 1.0, 1000.0);
+
+        // An array of bools that contains information about the state of each helicopters door
+        let mut opening_door: [bool; n_of_helicopters] = [false; n_of_helicopters];
+        let mut time_of_last_door_state_change = std::time::Instant::now();
+
         loop {
             counter+=1;
             if(counter % 100 == 0){
-                println!("xyz: ({}, {}, {}) | Horizontal angle: {}, sin: {}, cos: {} | | Vertical angle: {}, sin: {}, cos: {} |", camera_x, camera_y,camera_z, camera_horizontal_rot, camera_horizontal_rot.sin(), camera_horizontal_rot.cos(), camera_vertical_rot, camera_vertical_rot.sin(), camera_vertical_rot.cos());
+                //println!("xyz: ({}, {}, {}) | Horizontal angle: {}, sin: {}, cos: {} | | Vertical angle: {}, sin: {}, cos: {} |", camera_x, camera_y,camera_z, camera_horizontal_rot, camera_horizontal_rot.sin(), camera_horizontal_rot.cos(), camera_vertical_rot, camera_vertical_rot.sin(), camera_vertical_rot.cos());
             }
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(first_frame_time).as_secs_f32();
             let delta_time = now.duration_since(last_frame_time).as_secs_f32();
             last_frame_time = now;
-            unsafe {
-                
-                let translate_by_camera_pos: glm::Mat4 = glm::mat4(
-                    1.0, 0.0, 0.0, camera_x, 
-                    0.0, 1.0, 0.0, camera_y, 
-                    0.0, 0.0, 1.0, camera_z, 
-                    0.0, 0.0, 0.0, 1.0 
-                );
 
-                let cos_theta = camera_horizontal_rot.cos();
-                let sin_theta = camera_horizontal_rot.sin();
-
-                let horizontal_rotation: glm::Mat4 = glm::mat4(
-                    cos_theta, 0.0, sin_theta, 0.0, 
-                    0.0, 1.0, 0.0, 0.0, 
-                    -sin_theta, 0.0, cos_theta, 0.0, 
-                    0.0, 0.0, 0.0, 1.0 
-                );
-
-                let cos_theta_vert = camera_vertical_rot.cos();
-                let sin_theta_vert = camera_vertical_rot.sin();
-                
-                let vertical_rotation: glm::Mat4 = glm::mat4(
-                    1.0, 0.0, 0.0, 0.0, 
-                    0.0, cos_theta_vert, -sin_theta_vert, 0.0, 
-                    0.0, sin_theta_vert, cos_theta_vert, 0.0, 
-                    0.0, 0.0, 0.0, 1.0 
-                );
-
-                // Set angle so we can use it next frame
-
-                let combined_transformation = perspective*vertical_rotation*horizontal_rotation*translate_by_camera_pos;
-                gl::UniformMatrix4fv(2, 1, gl::FALSE, combined_transformation.as_ptr());
-                gl::Uniform1f(3, elapsed.sin()/2.0);
-            }
             
 
             // Handle keyboard input
@@ -328,7 +311,7 @@ fn main() {
                             // We want to move in the direction 180 degrees (or 1 PI) from where we're facing
                             camera_z += delta_time*scaling_factor*(-1.0*camera_horizontal_rot + std::f32::consts::PI).cos();
                             camera_x += delta_time*scaling_factor*(-1.0*camera_horizontal_rot + std::f32::consts::PI).sin();
-                            camera_y += delta_time*scaling_factor*(-1.0*(camera_vertical_rot + std::f32::consts::PI/2.0)).sin();
+                            camera_y += delta_time*scaling_factor*(camera_vertical_rot + std::f32::consts::PI).sin();
                             
                         },
                         VirtualKeyCode::D => {
@@ -373,13 +356,39 @@ fn main() {
                         },
                         // Preset for seeing the differece between noperspective and smooth
                         VirtualKeyCode::P => {
-                            camera_z = -0.70173496;
-                            camera_x = -0.5838481;
-                            camera_y = 1.1762283;
-                            camera_horizontal_rot = -0.43848413;
-                            camera_vertical_rot = -0.7772871;
-
+                            camera_x = 17.518263;
+                            camera_y = -2.1809983;
+                            camera_z = -0.0000011129528;
+                            camera_horizontal_rot = 1.4908568;
+                            camera_vertical_rot = 0.0;
                         },
+                        // Open door
+                        VirtualKeyCode::O => {
+                            unsafe{
+                                time_of_last_door_state_change = std::time::Instant::now();
+                                for i in 0..body_nodes.len() {
+                                    // Close
+                                    opening_door[i] = true;
+                                }     
+                            }
+                        },
+                        // Close door
+                        VirtualKeyCode::I => {
+                            unsafe{
+                                time_of_last_door_state_change = std::time::Instant::now();
+                                for i in 0..body_nodes.len() {
+                                    // Close
+                                    opening_door[i] = false;
+                                }     
+                            }
+                        },
+                        VirtualKeyCode::N => {
+                            movement_speed = movement_speed * 1.05;
+                        },
+                        VirtualKeyCode::M => {
+                            movement_speed = movement_speed * 0.95;
+                        },
+                        
                         _ => { }
                     }
                 }
@@ -393,25 +402,77 @@ fn main() {
                 gl::ClearColor(0.76862745, 0.71372549, 0.94901961, 1.0); // moon raker, full opacity
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
                 
-                // Issue the necessary commands to draw your scene here
-                //gl::BindVertexArray(vao_id);
-                // vertices.len() +
-                gl::BindVertexArray(lunar_vao_id);
-                gl::DrawElements(gl::TRIANGLES, lunar_surface.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+                let translate_by_camera_pos: glm::Mat4 = glm::mat4(
+                    1.0, 0.0, 0.0, camera_x, 
+                    0.0, 1.0, 0.0, camera_y, 
+                    0.0, 0.0, 1.0, camera_z, 
+                    0.0, 0.0, 0.0, 1.0 
+                );
 
-                gl::BindVertexArray(helicopter_body_vao_id);
-                gl::DrawElements(gl::TRIANGLES, helicopter.body.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+                let cos_theta = camera_horizontal_rot.cos();
+                let sin_theta = camera_horizontal_rot.sin();
 
-                gl::BindVertexArray(helicopter_door_vao_id);
-                gl::DrawElements(gl::TRIANGLES, helicopter.door.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
+                let horizontal_rotation: glm::Mat4 = glm::mat4(
+                    cos_theta, 0.0, sin_theta, 0.0, 
+                    0.0, 1.0, 0.0, 0.0, 
+                    -sin_theta, 0.0, cos_theta, 0.0, 
+                    0.0, 0.0, 0.0, 1.0 
+                );
 
-                gl::BindVertexArray(helicopter_main_rotor_vao_id);
-                gl::DrawElements(gl::TRIANGLES, helicopter.main_rotor.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
-
-                gl::BindVertexArray(helicopter_tail_rotor_vao_id);
-                gl::DrawElements(gl::TRIANGLES, helicopter.tail_rotor.vertices.len() as i32, gl::UNSIGNED_INT, ptr::null());
-
+                let cos_theta_vert = camera_vertical_rot.cos();
+                let sin_theta_vert = camera_vertical_rot.sin();
                 
+                let vertical_rotation: glm::Mat4 = glm::mat4(
+                    1.0, 0.0, 0.0, 0.0, 
+                    0.0, cos_theta_vert, -sin_theta_vert, 0.0, 
+                    0.0, sin_theta_vert, cos_theta_vert, 0.0, 
+                    0.0, 0.0, 0.0, 1.0 
+                );
+
+                let combined_transformation =  perspective*vertical_rotation*horizontal_rotation*translate_by_camera_pos;
+
+                let path = toolbox::simple_heading_animation(elapsed * movement_speed);
+                //println!("Door is opening: {}", opening_door[0]);
+                for i in 0..body_nodes.len() {
+                    body_nodes[i].position = glm::vec3(path.x + (40*i) as f32, elapsed.sin() * 10.0 + (20*(i+1)) as f32, path.z);
+                    //body_nodes[i].position = glm::vec3((40*i) as f32, 10.0 + (20*(i+1)) as f32, 0.0);
+                    body_nodes[i].rotation = glm::vec3(path.roll, path.yaw, path.pitch);
+                    //helicopter_body_node.rotation = glm::vec3(0.0, 3.14159265, 0.0);
+    
+                    (*body_nodes[i].children[1]).rotation = glm::vec3(0.0, elapsed * 2.0, 0.0);
+                    (*body_nodes[i].children[2]).rotation = glm::vec3(elapsed * 8.0, 0.0, 0.0);   
+
+                    // Ensure duration_since doesn't panic
+                    if time_of_last_door_state_change < now {
+                        let time_since_last_door_state_change = now.duration_since(time_of_last_door_state_change).as_secs_f32();
+                        // Open door
+                        if opening_door[i] {
+                            if (*body_nodes[i].children[0]).position[2] < 2.0 {
+                                (*body_nodes[i].children[0]).position += glm::vec3(0.0, 0.0, time_since_last_door_state_change*0.1);
+                            }
+                            else{
+                                (*body_nodes[i].children[0]).position = glm::vec3(0.0, 0.0, 2.0);
+                            }
+                        }
+                        else{
+                            if (*body_nodes[i].children[0]).position[2] > 0.0 {
+                                (*body_nodes[i].children[0]).position -= glm::vec3(0.0, 0.0, time_since_last_door_state_change*0.1);
+                            }
+                            else{
+                                (*body_nodes[i].children[0]).position = glm::vec3(0.0, 0.0, 0.0);
+                            }
+                        }
+                        
+                    }
+
+
+
+
+                }
+
+                update_node_transformations(&mut lunar_node, &glm::identity());
+
+                draw_scene(&lunar_node, &combined_transformation);
             }
 
             context.swap_buffers().unwrap();
